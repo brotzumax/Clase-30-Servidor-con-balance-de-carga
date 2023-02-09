@@ -64,12 +64,16 @@ require('dotenv').config();
 
 //Minimist
 const parseArgs = require('minimist');
-const argsOptions = { alias: { p: 'puerto' }, default: { puerto: 8080 } };
+const argsOptions = { alias: { p: 'puerto', m: 'modo' }, default: { puerto: 8080, modo: "FORK" } };
 const args = parseArgs(process.argv.slice(2), argsOptions);
 
 
 //Fork
 const { fork } = require('child_process');
+
+//Cluster
+const cluster = require('cluster');
+const numCPUs = require('os').cpus().length;
 
 
 //Inicio de servidor
@@ -127,13 +131,14 @@ app.get("/info", (req, res) => {
     res.send(
         "<h1>Información de la aplicación</h1>" +
         "<div style='display: flex; flex-direction: column'>" +
-        "<span>Argumentos de entrada: -p (puerto)</span>" +
+        "<span>Argumentos de entrada: -p (puerto), -m (modo: FORK - CLUSTER)</span>" +
         `<span>Nombre de la plataforma: ${process.platform}</span>` +
         `<span>Versión de node.js: ${process.version}</span>` +
         `<span>Memoria total reservada (rss): ${process.memoryUsage().rss}</span>` +
         `<span>Path de ejecución:  ${process.execPath}</span>` +
         `<span>Process id: ${process.pid}</span>` +
         `<span>Carpeta del proyecto: ${process.cwd()}</span>` +
+        `<span>Número de procesadores: ${numCPUs}</span>` +
         "</div>"
     );
 });
@@ -200,6 +205,30 @@ io.on('connection', function (socket) {
 });
 
 //Escucha del servidor
-httpServer.listen(args.puerto, () => {
-    console.log(`Servidor escuchando en puerto ${args.puerto}`);
-})
+if (args.modo === "FORK") {
+    console.log("Servidor modo fork");
+    httpServer.listen(args.puerto, () => {
+        console.log(`Servidor escuchando en puerto ${args.puerto}`);
+    });
+} else if (args.modo === "CLUSTER") {
+    if (cluster.isMaster) {
+        console.log("Servidor modo cluster");
+        console.log(`Master ${process.pid} is running`);
+
+        for (let i = 0; i < numCPUs; i++) {
+            cluster.fork();
+        }
+
+        cluster.on('exit', (worker, code, signal) => {
+            console.log(`Worker ${worker.process.pid} died`);
+        });
+    } else {
+        httpServer.listen(args.puerto, () => {
+            console.log(`Servidor escuchando en puerto ${args.puerto}`);
+        });
+        console.log(`Worker ${process.pid} started`);
+    }
+} else {
+    console.log(`${args.modo} no es un modo compatible (FORK - CLUSTER)`);
+}
+
